@@ -196,7 +196,7 @@ func resourceDatabaseRead(ctx context.Context, d *schema.ResourceData, meta inte
 
 	name := d.Get(dbNameAttr).(string)
 
-	rows, err := conn.Query(ctx, "SHOW DATABASES")
+	rows, err := conn.Query(ctx, "SELECT name AS database_name, owner, primary_region, regions, survival_goal FROM crdb_internal.databases")
 	if err != nil {
 		// handle this error better than this
 		return diag.FromErr(err)
