@@ -109,9 +109,9 @@ func resourceUserCreate(ctx context.Context, d *schema.ResourceData, meta interf
 	_, err = conn.Exec(ctx,
 		`CREATE USER `+
 			pq.QuoteIdentifier(name)+
-			` WITH PASSWORD `+
-			pq.QuoteIdentifier(password)+
-			` `+
+			` WITH PASSWORD '`+
+			password+
+			`' `+
 			roles,
 	)
 
@@ -271,9 +271,9 @@ func resourceUserUpdate(ctx context.Context, d *schema.ResourceData, meta interf
 		_, err := conn.Exec(ctx,
 			`ALTER USER `+
 				pq.QuoteIdentifier(name)+
-				` WITH PASSWORD `+
-				pq.QuoteIdentifier(password)+
-				` `+
+				` WITH PASSWORD '`+
+				password+
+				`' `+
 				roles,
 		)
 
