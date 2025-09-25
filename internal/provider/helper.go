@@ -39,46 +39,57 @@ func tryPortForwardIfNeeded(ctx context.Context, d *schema.ResourceData, meta in
 		}()
 
 		go func() {
+			defer close(errCh)
+			
 			svc, err := kubeClientSet.CoreV1().Services(nameSpace).Get(ctx, serviceName, metav1.GetOptions{})
 			if err != nil {
-				logDebug("failed to create Kubernetes client")
-				errCh <- err
+				logError("failed to get Kubernetes service %s in namespace %s: %v", serviceName, nameSpace, err)
+				errCh <- fmt.Errorf("failed to get Kubernetes service: %w", err)
+				return
 			}
 
 			selector := mapToSelectorStr(svc.Spec.Selector)
 			if selector == "" {
-				logDebug("failed to get service selector")
+				err := fmt.Errorf("service %s has no selector", serviceName)
+				logError("failed to get service selector: %v", err)
 				errCh <- err
+				return
 			}
 
 			pods, err := kubeClientSet.CoreV1().Pods(svc.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 			if err != nil {
-				logDebug("failed to get a pod list")
-				errCh <- err
+				logError("failed to get pod list for selector %s: %v", selector, err)
+				errCh <- fmt.Errorf("failed to get pod list: %w", err)
+				return
 			}
 
 			if len(pods.Items) == 0 {
-				logDebug("no Cockroachdb pods was found")
+				err := fmt.Errorf("no CockroachDB pods found with selector %s", selector)
+				logError("%v", err)
 				errCh <- err
+				return
 			}
 
 			livePod, err := getPodName(pods)
 			if err != nil {
-				logDebug("failed to get live Cockroachdb pod")
-				errCh <- err
+				logError("failed to get live CockroachDB pod: %v", err)
+				errCh <- fmt.Errorf("failed to get live pod: %w", err)
+				return
 			}
 
 			serverURL, err := url.Parse(
 				fmt.Sprintf("%s/api/v1/namespaces/%s/pods/%s/portforward", kubeConfig.Host, nameSpace, livePod))
 			if err != nil {
-				logDebug("failed to construct server url")
-				errCh <- err
+				logError("failed to construct server URL: %v", err)
+				errCh <- fmt.Errorf("failed to construct server URL: %w", err)
+				return
 			}
 
 			transport, upgrader, err := spdy.RoundTripperFor(kubeConfig)
 			if err != nil {
-				logDebug("failed to create a round tripper")
-				errCh <- err
+				logError("failed to create round tripper: %v", err)
+				errCh <- fmt.Errorf("failed to create round tripper: %w", err)
+				return
 			}
 
 			dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, serverURL)
@@ -95,8 +106,9 @@ func tryPortForwardIfNeeded(ctx context.Context, d *schema.ResourceData, meta in
 				os.Stdout,
 				os.Stderr)
 			if err != nil {
-				logDebug("failed to create port-forward: %s:%s", localPort, remotePort)
-				errCh <- err
+				logError("failed to create port-forward %s:%s: %v", localPort, remotePort, err)
+				errCh <- fmt.Errorf("failed to create port-forward: %w", err)
+				return
 			}
 
 			go pf.ForwardPorts()
@@ -105,13 +117,18 @@ func tryPortForwardIfNeeded(ctx context.Context, d *schema.ResourceData, meta in
 
 			actualPorts, err := pf.GetPorts()
 			if err != nil {
-				logDebug("failed to get port-forward ports")
-				errCh <- err
+				logError("failed to get port-forward ports: %v", err)
+				errCh <- fmt.Errorf("failed to get port-forward ports: %w", err)
+				return
 			}
 			if len(actualPorts) != 1 {
-				logDebug("cannot get forwarded ports: unexpected length %d", len(actualPorts))
+				err := fmt.Errorf("unexpected number of forwarded ports: got %d, expected 1", len(actualPorts))
+				logError("%v", err)
 				errCh <- err
+				return
 			}
+			
+			logInfo("Port forwarding established: %s:%s -> %s", localPort, remotePort, livePod)
 		}()
 
 		select {

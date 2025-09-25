@@ -81,6 +81,7 @@ func resourceUserCreate(ctx context.Context, d *schema.ResourceData, meta interf
 	stopCh := make(chan struct{}, 1)
 	// readyCh communicate when the port forward is ready to get traffic
 	readyCh := make(chan struct{})
+	defer close(stopCh)
 
 	if local_port == "" {
 		return diag.Errorf("local_port can't be an empty string")
@@ -94,13 +95,19 @@ func resourceUserCreate(ctx context.Context, d *schema.ResourceData, meta interf
 		return diag.Errorf("password can't be an empty string")
 	}
 
-	tryPortForwardIfNeeded(ctx, d, meta, stopCh, readyCh, local_port)
+	if err := tryPortForwardIfNeeded(ctx, d, meta, stopCh, readyCh, local_port); err != nil {
+		return err
+	}
 
 	conn, err := pgx.Connect(ctx, dns)
-
 	if err != nil {
 		return diag.FromErr(err)
 	}
+	defer func() {
+		if closeErr := conn.Close(ctx); closeErr != nil {
+			logError("failed to close database connection: %v", closeErr)
+		}
+	}()
 
 	if err := conn.Ping(ctx); err != nil {
 		return diag.FromErr(err)
@@ -134,12 +141,10 @@ func resourceUserCreate(ctx context.Context, d *schema.ResourceData, meta interf
 	}
 
 	d.SetId(name)
-	d.Set(dbNameAttr, name)
+	d.Set(dbUsernameAttr, name)
 	d.Set(dbPasswordAttr, password)
 	d.Set(dbRolesAttr, roles)
 	d.Set(dbAdminAttr, isAdmin)
-
-	close(stopCh)
 
 	return diag.Diagnostics{}
 }
@@ -159,14 +164,21 @@ func resourceUserRead(ctx context.Context, d *schema.ResourceData, meta interfac
 	stopCh := make(chan struct{}, 1)
 	// readyCh communicate when the port forward is ready to get traffic
 	readyCh := make(chan struct{})
+	defer close(stopCh)
 
-	tryPortForwardIfNeeded(ctx, d, meta, stopCh, readyCh, local_port)
+	if err := tryPortForwardIfNeeded(ctx, d, meta, stopCh, readyCh, local_port); err != nil {
+		return err
+	}
 
 	conn, err := pgx.Connect(ctx, dns)
-
 	if err != nil {
 		return diag.FromErr(err)
 	}
+	defer func() {
+		if closeErr := conn.Close(ctx); closeErr != nil {
+			logError("failed to close database connection: %v", closeErr)
+		}
+	}()
 
 	if err := conn.Ping(ctx); err != nil {
 		return diag.FromErr(err)
@@ -212,13 +224,11 @@ func resourceUserRead(ctx context.Context, d *schema.ResourceData, meta interfac
 		return diag.FromErr(err)
 	}
 
-	if found == false {
+	if !found {
 		if err := d.Set(dbNameAttr, ""); err != nil {
 			return diag.FromErr(err)
 		}
 	}
-
-	close(stopCh)
 
 	return nil
 }
@@ -240,6 +250,7 @@ func resourceUserUpdate(ctx context.Context, d *schema.ResourceData, meta interf
 	stopCh := make(chan struct{}, 1)
 	// readyCh communicate when the port forward is ready to get traffic
 	readyCh := make(chan struct{})
+	defer close(stopCh)
 
 	tryPortForwardIfNeeded(ctx, d, meta, stopCh, readyCh, local_port)
 
@@ -312,7 +323,6 @@ func resourceUserUpdate(ctx context.Context, d *schema.ResourceData, meta interf
 		d.Set(dbPasswordAttr, npass)
 	}
 
-	close(stopCh)
 	d.Partial(false)
 	return diag.Diagnostics{}
 }
@@ -332,6 +342,7 @@ func resourceUserDelete(ctx context.Context, d *schema.ResourceData, meta interf
 	stopCh := make(chan struct{}, 1)
 	// readyCh communicate when the port forward is ready to get traffic
 	readyCh := make(chan struct{})
+	defer close(stopCh)
 
 	tryPortForwardIfNeeded(ctx, d, meta, stopCh, readyCh, local_port)
 
@@ -373,7 +384,6 @@ func resourceUserDelete(ctx context.Context, d *schema.ResourceData, meta interf
 		return diag.FromErr(err)
 	}
 
-	close(stopCh)
 	return diag.Diagnostics{}
 }
 
